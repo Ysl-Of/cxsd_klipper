@@ -4,12 +4,17 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import logging
-
+import mcu
+import sys
 class GCodeButton:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.name = config.get_name().split(' ')[-1]
         self.pin = config.get('pin')
+
+        self.pininfo = config.get('pin_info',None)
+
+
         self.last_state = 0
         buttons = self.printer.load_object(config, "buttons")
         if config.get('analog_range', None) is None:
@@ -34,10 +39,14 @@ class GCodeButton:
 
     def button_callback(self, eventtime, state):
         self.last_state = state
+        logging.info("wxl button_callback: %s"%(state))
         template = self.press_template
         if not state:
             template = self.release_template
         try:
+            if self.pininfo is not None:
+                self.printer.invoke_async_shutdown("   wxl shutdown with   '%s'" % ('button',))
+                logging.info("wxl button_callback:_shutdown %s" % (state))
             self.gcode.run_script(template.render())
         except:
             logging.exception("Script running error")

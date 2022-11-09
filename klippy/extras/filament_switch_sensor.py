@@ -10,6 +10,9 @@ class RunoutHelper:
         self.name = config.get_name().split()[-1]
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
+        ppins = self.printer.lookup_object('pins')
+        self.gas = ppins.setup_pin('digital_out', config.get('gas_pin'))
+        self.gas.setup_start_value(0, 0)
         self.gcode = self.printer.lookup_object('gcode')
         # Read config
         self.runout_pause = config.getboolean('pause_on_runout', True)
@@ -29,8 +32,15 @@ class RunoutHelper:
         self.min_event_systime = self.reactor.NEVER
         self.filament_present = False
         self.sensor_enabled = True
+        self.add_filament_time = 0
+        self.add_filament_cnt = 0
+        self.add_filament_status = False
+        self.manual_add_filament_status = False
+        self.manual_add_filament_time = 0
         # Register commands and event handlers
         self.printer.register_event_handler("klippy:ready", self._handle_ready)
+        self.filament_update_timer = self.reactor.register_timer(
+            self.filament_update_event)
         self.gcode.register_mux_command(
             "QUERY_FILAMENT_SENSOR", "SENSOR", self.name,
             self.cmd_QUERY_FILAMENT_SENSOR,
@@ -39,8 +49,14 @@ class RunoutHelper:
             "SET_FILAMENT_SENSOR", "SENSOR", self.name,
             self.cmd_SET_FILAMENT_SENSOR,
             desc=self.cmd_SET_FILAMENT_SENSOR_help)
+        self.gcode.register_mux_command(
+            "MANUAL_ADD_FIALMENT", "SENSOR", self.name,
+            self.cmd_MANUAL_ADD_FIALMENT,
+            desc=self.cmd_MANUAL_ADD_FIALMENT_help)
     def _handle_ready(self):
         self.min_event_systime = self.reactor.monotonic() + 2.
+        self.reactor.update_timer(self.filament_update_timer,
+                                  self.reactor.NOW)
     def _runout_event_handler(self, eventtime):
         # Pausing from inside an event requires that the pause portion
         # of pause_resume execute immediately.
@@ -102,6 +118,55 @@ class RunoutHelper:
     cmd_SET_FILAMENT_SENSOR_help = "Sets the filament sensor on/off"
     def cmd_SET_FILAMENT_SENSOR(self, gcmd):
         self.sensor_enabled = gcmd.get_int("ENABLE", 1)
+    cmd_MANUAL_ADD_FIALMENT_help = "Set manual add filament"
+    def cmd_MANUAL_ADD_FIALMENT(self, gcmd=None):
+        self.manual_add_filament_status = True
+
+    def filament_update_event(self, eventtime):
+        # Determine "printing" status
+        idle_timeout = self.printer.lookup_object("idle_timeout")
+        is_printing = idle_timeout.get_status(eventtime)["state"]
+        logging.info("printing status:%s" % is_printing)
+        systime = self.reactor.monotonic()
+        print_time = self.gas.get_mcu().estimated_print_time(systime)
+
+        if self.manual_add_filament_status:
+            self.gas.set_digital(print_time + 0.5, 1)
+            self.manual_add_filament_time += 1
+            if self.manual_add_filament_time >= 15:
+                self.manual_add_filament_time = 0
+                self.manual_add_filament_status = False
+            return eventtime + 1
+
+        if self.add_filament_status:
+            self.gas.set_digital(print_time + 0.5, 1)
+            self.add_filament_time += 1
+            if self.add_filament_time >= 15:
+                self.add_filament_time = 0
+                self.add_filament_cnt += 1
+                self.add_filament_status = False
+            return eventtime + 1
+
+        if self.filament_present:
+            self.add_filament_cnt = 0
+
+        if not self.filament_present and self.add_filament_cnt < 3 and is_printing == "Printing":
+            self.add_filament_status = True
+            self.gas.set_digital(print_time + 0.5, 0)
+            return eventtime + 1
+
+        if self.add_filament_cnt >= 3:
+            self.add_filament_time = 0
+            self.add_filament_cnt = 0
+            self.add_filament_status = False
+            self.gas.set_digital(print_time + 0.5, 0)
+            self.gcode.run_script("PAUSE" + "\nM400")
+            logging.info("pause printing.")
+            return eventtime + 1
+
+        self.gas.set_digital(print_time + 0.5, 0)
+        return eventtime + 1
+
 
 class SwitchSensor:
     def __init__(self, config):

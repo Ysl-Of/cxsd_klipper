@@ -212,7 +212,11 @@ clock_setup(void)
         uint32_t div = CONFIG_CLOCK_FREQ / (CONFIG_CLOCK_REF_FREQ / 2);
         cfgr = 1 << RCC_CFGR_PLLSRC_Pos;
         if ((div & 1) && div <= 16)
+            #if CONFIG_MACH_STM32F103
             cfgr |= RCC_CFGR_PLLXTPRE_HSE_DIV2;
+	    	#else
+	    	cfgr |= RCC_CFGR_PLLXTPRE_PREDIV1;
+	    	#endif
         else
             div /= 2;
         cfgr |= (div - 2) << RCC_CFGR_PLLMULL_Pos;
