@@ -92,3 +92,5 @@ Klipper is Free Software. See the [license](COPYING) or read the
 4. 延迟摄影按层打印;
 5. 按层打印的注释替换TAKE_NEW_FRAME记录到日志;
 6. PyYAML库替换为3.11版本;
+
+### Test
