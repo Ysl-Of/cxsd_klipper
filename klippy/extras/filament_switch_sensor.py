@@ -16,6 +16,7 @@ class RunoutHelper:
         self.gcode = self.printer.lookup_object('gcode')
         # Read config
         self.runout_pause = config.getboolean('pause_on_runout', True)
+        self.is_auto_add_filament = config.getboolean('is_auto_add_filament', True)
         if self.runout_pause:
             self.printer.load_object(config, 'pause_resume')
         self.runout_gcode = self.insert_gcode = None
@@ -53,6 +54,15 @@ class RunoutHelper:
             "MANUAL_ADD_FIALMENT", "SENSOR", self.name,
             self.cmd_MANUAL_ADD_FIALMENT,
             desc=self.cmd_MANUAL_ADD_FIALMENT_help)
+
+        self.gcode.register_mux_command(
+            "ENABLE_AUTO_ADD_FIALMENT", "SENSOR", self.name,
+            self.cmd_ENABLE_AUTO_ADD_FIALMENT,
+            desc=self.cmd_ENABLE_AUTO_ADD_FIALMENT_help)
+        self.gcode.register_mux_command(
+            "DISABLE_AUTO_ADD_FIALMENT", "SENSOR", self.name,
+            self.cmd_DISABLE_AUTO_ADD_FIALMENT,
+            desc=self.cmd_DISABLE_AUTO_ADD_FIALMENT_help)
     def _handle_ready(self):
         self.min_event_systime = self.reactor.monotonic() + 2.
         self.reactor.update_timer(self.filament_update_timer,
@@ -89,21 +99,21 @@ class RunoutHelper:
         idle_timeout = self.printer.lookup_object("idle_timeout")
         is_printing = idle_timeout.get_status(eventtime)["state"] == "Printing"
         # Perform filament action associated with status change (if any)
-        if is_filament_present:
-            if not is_printing and self.insert_gcode is not None:
-                # insert detected
-                self.min_event_systime = self.reactor.NEVER
-                logging.info(
-                    "Filament Sensor %s: insert event detected, Time %.2f" %
-                    (self.name, eventtime))
-                self.reactor.register_callback(self._insert_event_handler)
-        elif is_printing and self.runout_gcode is not None:
-            # runout detected
-            self.min_event_systime = self.reactor.NEVER
-            logging.info(
-                "Filament Sensor %s: runout event detected, Time %.2f" %
-                (self.name, eventtime))
-            self.reactor.register_callback(self._runout_event_handler)
+        # if is_filament_present:
+        #     if not is_printing and self.insert_gcode is not None:
+        #         # insert detected
+        #         self.min_event_systime = self.reactor.NEVER
+        #         logging.info(
+        #             "Filament Sensor %s: insert event detected, Time %.2f" %
+        #             (self.name, eventtime))
+        #         self.reactor.register_callback(self._insert_event_handler)
+        # elif is_printing and self.runout_gcode is not None:
+        #     # runout detected
+        #     self.min_event_systime = self.reactor.NEVER
+        #     logging.info(
+        #         "Filament Sensor %s: runout event detected, Time %.2f" %
+        #         (self.name, eventtime))
+        #     self.reactor.register_callback(self._runout_event_handler)
     def get_status(self, eventtime):
         return {
             "filament_detected": bool(self.filament_present),
@@ -137,36 +147,56 @@ class RunoutHelper:
                 self.manual_add_filament_time = 0
                 self.manual_add_filament_status = False
             return eventtime + 1
+        logging.info("current is_auto_add_filament: %s" % self.is_auto_add_filament)
+        if self.is_auto_add_filament:
+            logging.info("is_auto_add_filament: True")
+            if self.add_filament_status:
+                if self.add_filament_wait <= 15:
+                    self.add_filament_wait += 1
+                    return eventtime + 1
+                self.gas.set_digital(print_time + 0.5, 1)
+                self.add_filament_time += 1
+                if self.add_filament_time >= 15:
+                    self.add_filament_time = 0
+                    self.add_filament_cnt += 1
+                    self.add_filament_status = False
+                return eventtime + 1
 
-        if self.add_filament_status:
-            self.gas.set_digital(print_time + 0.5, 1)
-            self.add_filament_time += 1
-            if self.add_filament_time >= 15:
+            if self.filament_present:
+                self.add_filament_cnt = 0
+                self.add_filament_wait = 0
+            # 1 ok
+            if not self.filament_present and self.add_filament_cnt < 3 and is_printing == "Printing" and not self.manual_add_filament_status:
+                # 2 ok
+                self.add_filament_wait = 0
+                self.add_filament_status = True
+                self.gas.set_digital(print_time + 0.5, 0)
+                return eventtime + 1
+
+            if self.add_filament_cnt >= 3:
+                self.add_filament_wait = 0
                 self.add_filament_time = 0
-                self.add_filament_cnt += 1
+                self.add_filament_cnt = 0
                 self.add_filament_status = False
-            return eventtime + 1
-
-        if self.filament_present:
-            self.add_filament_cnt = 0
-
-        if not self.filament_present and self.add_filament_cnt < 3 and is_printing == "Printing":
-            self.add_filament_status = True
-            self.gas.set_digital(print_time + 0.5, 0)
-            return eventtime + 1
-
-        if self.add_filament_cnt >= 3:
-            self.add_filament_time = 0
-            self.add_filament_cnt = 0
-            self.add_filament_status = False
-            self.gas.set_digital(print_time + 0.5, 0)
-            self.gcode.run_script("PAUSE" + "\nM400")
-            logging.info("pause printing.")
-            return eventtime + 1
+                self.gas.set_digital(print_time + 0.5, 0)
+                self.gcode.run_script("PAUSE" + "\nG1 X50 Y50" + "\nM400")
+                logging.info("pause printing.")
+                return eventtime + 1
 
         self.gas.set_digital(print_time + 0.5, 0)
         return eventtime + 1
 
+    cmd_ENABLE_AUTO_ADD_FIALMENT_help = "Enable auto add filament"
+    def cmd_ENABLE_AUTO_ADD_FIALMENT(self, gcmd=None):
+        self.is_auto_add_filament = True
+        configfile = self.printer.lookup_object('configfile')
+        configfile.set('filament_switch_sensor my_sensor', 'is_auto_add_filament', True)
+
+    cmd_DISABLE_AUTO_ADD_FIALMENT_help = "Disable auto add filament"
+    def cmd_DISABLE_AUTO_ADD_FIALMENT(self, gcmd=None):
+        self.is_auto_add_filament = False
+        configfile = self.printer.lookup_object('configfile')
+        configfile.set('filament_switch_sensor my_sensor', 'is_auto_add_filament', False)
 
 class SwitchSensor:
     def __init__(self, config):
