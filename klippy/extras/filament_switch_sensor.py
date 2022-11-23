@@ -198,6 +198,9 @@ class RunoutHelper:
         configfile = self.printer.lookup_object('configfile')
         configfile.set('filament_switch_sensor my_sensor', 'is_auto_add_filament', False)
 
+    def has_filament_present(self):
+        return self.filament_present
+
 class SwitchSensor:
     def __init__(self, config):
         printer = config.get_printer()
@@ -208,6 +211,8 @@ class SwitchSensor:
         self.get_status = self.runout_helper.get_status
     def _button_handler(self, eventtime, state):
         self.runout_helper.note_filament_present(state)
+    def has_filament_present(self):
+        return self.runout_helper.has_filament_present()
 
 def load_config_prefix(config):
     return SwitchSensor(config)

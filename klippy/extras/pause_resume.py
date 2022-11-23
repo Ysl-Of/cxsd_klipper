@@ -6,6 +6,7 @@
 
 class PauseResume:
     def __init__(self, config):
+        self.config = config
         self.printer = config.get_printer()
         self.gcode = self.printer.lookup_object('gcode')
         self.recover_velocity = config.getfloat('recover_velocity', 50.)
@@ -79,6 +80,15 @@ class PauseResume:
             gcmd.respond_info("""{"code": "key16", "msg": "Print is not paused, resume aborted"}""")
             return
         velocity = gcmd.get_float('VELOCITY', self.recover_velocity)
+
+        # if has filament
+        # continue print
+        # else
+        # pause
+        if not self.printer.load_object(
+                    self.config, "filament_switch_sensor my_sensor").has_filament_present():
+            gcmd.respond_info("""{"code": "key1000", "msg": "Filament Sensor: filament not detected"}""")
+            return
         self.gcode.run_script_from_command(
             "RESTORE_GCODE_STATE STATE=PAUSE_STATE MOVE=1 MOVE_SPEED=%.4f"
             % (velocity))
