@@ -63,6 +63,10 @@ class RunoutHelper:
             "DISABLE_AUTO_ADD_FIALMENT", "SENSOR", self.name,
             self.cmd_DISABLE_AUTO_ADD_FIALMENT,
             desc=self.cmd_DISABLE_AUTO_ADD_FIALMENT_help)
+        self.gcode.register_mux_command(
+            "QUERY_AUTO_ADD_FIALMENT", "SENSOR", self.name,
+            self.cmd_QUERY_AUTO_ADD_FIALMENT,
+            desc=self.cmd_QUERY_AUTO_ADD_FIALMENT_help)
     def _handle_ready(self):
         self.min_event_systime = self.reactor.monotonic() + 2.
         self.reactor.update_timer(self.filament_update_timer,
@@ -197,6 +201,14 @@ class RunoutHelper:
         self.is_auto_add_filament = False
         configfile = self.printer.lookup_object('configfile')
         configfile.set('filament_switch_sensor my_sensor', 'is_auto_add_filament', False)
+
+    cmd_QUERY_AUTO_ADD_FIALMENT_help = "Query the status of the AUTO_ADD_FIALMENT"
+    def cmd_QUERY_AUTO_ADD_FIALMENT(self, gcmd):
+        if self.is_auto_add_filament:
+            msg = "Filament Sensor: filament auto add"
+        else:
+            msg = "Filament Sensor: filament not auto add"
+        gcmd.respond_info(msg)
 
     def has_filament_present(self):
         return self.filament_present
