@@ -22,6 +22,7 @@ class MyLed:
         self.myled_update_timer = self.reactor.register_timer(
             self.led_update_event)
         self.mcu_led.setup_start_value(0, 0)
+        self.print_stats = self.printer.load_object(config, 'print_stats')
 
 
     def handle_ready(self):
@@ -32,6 +33,9 @@ class MyLed:
     def led_update_event(self, eventtime):
         print_time = self.mcu_led.get_mcu().estimated_print_time(eventtime)
         print_time = max(print_time, self.last_print_time + PIN_MIN_TIME)
+        logging.info("led_update_event state:%s" % self.print_stats.get_status(eventtime).get("state"))
+        if self.print_stats.get_status(eventtime).get("state") != "printing":
+            return eventtime + 1
         logging.info("<<<<<<<<<<<<<<<<<<<<<<led test>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>%s"%print_time)
         if self.toggle:
             logging.info("......................led ON...........................")
