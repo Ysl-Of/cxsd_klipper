@@ -66,7 +66,7 @@ class PrinterStats:
     def generate_stats(self, eventtime):
         stats = [cb(eventtime) for cb in self.stats_cb]
         if max([s[0] for s in stats]):
-            if self.count > 5:
+            if self.count > 30:
                 self.count = 0
                 logging.info("Stats %.1f: %s", eventtime,
                              ' '.join([s[1] for s in stats]))
